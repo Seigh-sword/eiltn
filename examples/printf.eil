@@ -1,0 +1,13 @@
+$ the four io builtins, lowered to out, err and printf nodes
+
+fn main() {
+    let name = "eiltn"
+    let n = 42
+    let pi = 3.14159
+
+    println("plain line to stdout")
+    out.println("same thing, explicit")
+    err.println("a line to stderr")
+    out.printf("hello %s! n=%d pi=%.2f hex=%x char=%c\n", name, n, pi, 255, 33)
+    err.printf("stderr printf: %d%%\n", 99)
+}

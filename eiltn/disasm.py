@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 from . import ein
 
 
@@ -8,7 +10,7 @@ def _opnd(k, v, consts):
             out = c.replace("\\", "\\\\").replace('"', '\\"')
             out = out.replace("\n", "\\n").replace("\t", "\\t").replace("\0", "\\0")
             return '#"%s"' % out
-        return "#%d" % c
+        return "#%r" % (c,)
     if k == ein.K_REG:
         return "r%d" % v
     if k == ein.K_CELL:
@@ -34,8 +36,17 @@ def _fmt_ins(x, prog):
         if ops:
             return "%s" % _opnd(ops[0][0], ops[0][1], consts)
         return "#0"
-    if op == ein.OUT or op == ein.ERR:
-        return _opnd(ops[0][0], ops[0][1], consts)
+    if op == ein.OUT:
+        return "%s ->" % _opnd(ops[0][0], ops[0][1], consts)
+    if op == ein.ERR:
+        return "%s -> err" % _opnd(ops[0][0], ops[0][1], consts)
+    if op == ein.PRINTF:
+        args = ", ".join(_opnd(k, v, consts) for k, v in ops)
+        return "%s -> %s" % (args, "out" if x.aux == 0 else "err")
+    if op == ein.SELECT:
+        return "r%d <- %s ? %s : %s" % (x.dst, _opnd(ops[0][0], ops[0][1], consts),
+                                        _opnd(ops[1][0], ops[1][1], consts),
+                                        _opnd(ops[2][0], ops[2][1], consts))
     if op == ein.CALL:
         fn = prog.funcs[x.aux]
         args = ", ".join(_opnd(k, v, consts) for k, v in ops)
@@ -63,7 +74,7 @@ def text(prog):
             shown = shown.replace("\n", "\\n").replace("\t", "\\t").replace("\0", "\\0")
             lines.append("  const #%-3d %s" % (i, '"%s"' % shown))
         else:
-            lines.append("  const #%-3d %d" % (i, c))
+            lines.append("  const #%-3d %r" % (i, c))
     for f in prog.funcs:
         params = ", ".join("m%d" % i for i in range(f.arity))
         lines.append("")
@@ -72,6 +83,6 @@ def text(prog):
         for blk in f.blocks:
             lines.append(".b%d:" % blk.index)
             for addr, x in enumerate(blk.ins):
-                lines.append("  %04d  %-6s %-42s @%d"
+                lines.append("  %04d  %-7s %-46s @%d"
                              % (addr, ein.OPNAMES[x.op], _fmt_ins(x, prog), x.line))
     return "\n".join(lines)

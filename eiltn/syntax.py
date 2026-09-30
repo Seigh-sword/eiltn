@@ -1,8 +1,9 @@
-class Program:
-    __slots__ = ("attrs", "funcs")
+#!/usr/bin/python3
 
-    def __init__(self, attrs, funcs):
-        self.attrs = attrs
+class Program:
+    __slots__ = ("funcs",)
+
+    def __init__(self, funcs):
         self.funcs = funcs
 
 
@@ -59,6 +60,24 @@ class While:
     def __init__(self, cond, body, line):
         self.cond = cond
         self.body = body
+        self.line = line
+
+
+class For:
+    __slots__ = ("init", "cond", "step", "body", "line")
+
+    def __init__(self, init, cond, step, body, line):
+        self.init = init
+        self.cond = cond
+        self.step = step
+        self.body = body
+        self.line = line
+
+
+class Break:
+    __slots__ = ("line",)
+
+    def __init__(self, line):
         self.line = line
 
 

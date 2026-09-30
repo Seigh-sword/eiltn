@@ -1,10 +1,12 @@
+#!/usr/bin/python3
+
 from .errors import SyntaxErr
 from .syntax import (
-    Program, FnDef, Let, Set, Out, If, While, Return, ExprStmt,
+    Program, FnDef, Let, Set, Out, If, While, For, Break, Return, ExprStmt,
     Lit, Var, Un, Bin, Call,
 )
 
-HEADER_ATTRS = ("threads",)
+IO_METHODS = ("out.println", "err.println", "out.printf", "err.printf")
 
 
 class Parser:
@@ -13,12 +15,16 @@ class Parser:
         self.i = 0
         self.name = name
 
-    def peek(self):
-        return self.t[self.i]
+    def peek(self, k=0):
+        j = self.i + k
+        if j >= len(self.t):
+            j = len(self.t) - 1
+        return self.t[j]
 
     def advance(self):
         tok = self.t[self.i]
-        self.i += 1
+        if tok.kind != "eof":
+            self.i += 1
         return tok
 
     def fault(self, msg, tok=None):
@@ -45,19 +51,6 @@ class Parser:
             self.i += 1
 
     def parse(self):
-        tok = self.peek()
-        if tok.kind != "dir":
-            self.fault("program must begin with the #bin/ header", tok)
-        self.advance()
-        attrs = {}
-        while self.peek().kind == "ident":
-            key_tok = self.advance()
-            self.expect("op", "=")
-            val_tok = self.expect("int")
-            if key_tok.value not in HEADER_ATTRS:
-                self.fault("unknown header attribute %r (allowed: %s)"
-                           % (key_tok.value, ", ".join(HEADER_ATTRS)), key_tok)
-            attrs[key_tok.value] = val_tok.value
         self.skip_nl()
         funcs = []
         while self.peek().kind != "eof":
@@ -65,7 +58,7 @@ class Parser:
             self.skip_nl()
         if not funcs:
             self.fault("program defines no functions")
-        return Program(attrs, funcs)
+        return Program(funcs)
 
     def fn_def(self):
         tok = self.expect("kw", "fn")
@@ -114,10 +107,6 @@ class Parser:
                 self.expect("op", "=")
                 e = self.expr()
                 return Set(name, e, tok.line)
-            if w == "out" or w == "err":
-                self.advance()
-                e = self.expr()
-                return Out(e, tok.line, 0 if w == "out" else 1)
             if w == "if":
                 return self.if_stmt()
             if w == "while":
@@ -125,6 +114,11 @@ class Parser:
                 cond = self.expr()
                 body = self.block()
                 return While(cond, body, tok.line)
+            if w == "for":
+                return self.for_stmt()
+            if w == "break":
+                self.advance()
+                return Break(tok.line)
             if w == "return":
                 self.advance()
                 t = self.peek()
@@ -134,7 +128,7 @@ class Parser:
             self.fault("unexpected keyword %r in statement position" % w, tok)
         e = self.expr()
         if not isinstance(e, Call):
-            self.fault("statement must be let, set, out, err, if, while, return or a call", tok)
+            self.fault("statement must be let, set, if, while, for, break, return or a call", tok)
         return ExprStmt(e, tok.line)
 
     def if_stmt(self):
@@ -153,6 +147,44 @@ class Parser:
         else:
             self.i = save
         return If(cond, then, els, tok.line)
+
+    def assign_clause(self, allow_let, allow_bare):
+        tok = self.peek()
+        if allow_let and tok.kind == "kw" and tok.value == "let":
+            self.advance()
+            name = self.expect("ident").value
+            self.expect("op", "=")
+            return Let(name, self.expr(), tok.line)
+        if tok.kind == "kw" and tok.value == "set":
+            self.advance()
+            name = self.expect("ident").value
+            self.expect("op", "=")
+            return Set(name, self.expr(), tok.line)
+        if allow_bare and tok.kind == "ident" and self.peek(1).kind == "op" \
+                and self.peek(1).value == "=":
+            self.advance()
+            name = tok.value
+            self.expect("op", "=")
+            return Set(name, self.expr(), tok.line)
+        return None
+
+    def for_stmt(self):
+        tok = self.expect("kw", "for")
+        init = self.assign_clause(True, True)
+        self.expect("op", ";")
+        self.skip_nl()
+        cond = None
+        if not self.at_op(";"):
+            cond = self.expr()
+        self.expect("op", ";")
+        self.skip_nl()
+        step = None
+        if not (self.peek().kind == "op" and self.peek().value == "{"):
+            step = self.assign_clause(False, True)
+            if step is None:
+                self.fault("for step must be an assignment like i = i + 1")
+        body = self.block()
+        return For(init, cond, step, body, tok.line)
 
     def expr(self):
         return self.or_expr()
@@ -244,6 +276,9 @@ class Parser:
         if tok.kind == "int":
             self.advance()
             return Lit(tok.value, tok.line)
+        if tok.kind == "float":
+            self.advance()
+            return Lit(tok.value, tok.line)
         if tok.kind == "str":
             self.advance()
             return Lit(tok.value, tok.line)
@@ -252,6 +287,23 @@ class Parser:
             return Lit(1 if tok.value == "true" else 0, tok.line)
         if tok.kind == "ident":
             self.advance()
+            if self.at_op("."):
+                self.advance()
+                if tok.value not in ("out", "err"):
+                    self.fault("%r has no members; only out and err do" % tok.value, tok)
+                m = self.expect("ident")
+                full = "%s.%s" % (tok.value, m.value)
+                if full not in IO_METHODS:
+                    self.fault("unknown member %r (out and err have println and printf)" % full, m)
+                self.expect("op", "(")
+                args = []
+                if not self.at_op(")"):
+                    args.append(self.expr())
+                    while self.at_op(","):
+                        self.advance()
+                        args.append(self.expr())
+                self.expect("op", ")")
+                return Call(full, args, tok.line)
             if self.at_op("("):
                 self.advance()
                 args = []

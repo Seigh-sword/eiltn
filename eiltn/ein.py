@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 K_NONE = 0
 K_CONST = 1
 K_REG = 2
@@ -30,6 +32,8 @@ OR = 27
 NEG = 30
 BNOT = 31
 NOT = 32
+SELECT = 33
+PRINTF = 34
 
 OUT = 40
 ERR = 41
@@ -61,9 +65,13 @@ OPNAMES = {
     LE: "LE",
     GT: "GT",
     GE: "GE",
+    AND: "AND",
+    OR: "OR",
     NEG: "NEG",
     BNOT: "BNOT",
     NOT: "NOT",
+    SELECT: "SELECT",
+    PRINTF: "PRINTF",
     OUT: "OUT",
     ERR: "ERR",
     JMP: "JMP",
@@ -73,11 +81,23 @@ OPNAMES = {
     NATIVE: "NATIVE",
 }
 
-BINARY_OPS = frozenset((ADD, SUB, MUL, DIV, MOD, BAND, BOR, BXOR, SHL, SHR,
-                        EQ, NE, LT, LE, GT, GE, AND_OP := 62 if False else 0)) if False else None
+NATIVES = (
+    "clock", "rand", "randint", "sqrt", "pow", "floor", "ceil", "round",
+    "sin", "cos", "tan", "log", "exp", "abs", "fmod",
+    "len", "substr", "upper", "lower", "trim", "contains", "index",
+    "replace", "repeat", "reverse",
+    "str", "num", "int", "float", "hex", "bin", "chr", "ord",
+    "exit", "argc", "argv",
+)
 
-NATIVES = ("clock", "len", "ord", "chr", "str", "num", "abs", "hex")
-NATIVE_ARITY = (0, 1, 1, 1, 1, 1, 1, 1)
+NATIVE_ARITY = (
+    0, 0, 2, 1, 2, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 2,
+    1, 3, 1, 1, 1, 2, 2,
+    3, 2, 1,
+    1, 1, 1, 1, 1, 1, 1, 1,
+    1, 0, 1,
+)
 
 WORD_MASK = (1 << 64) - 1
 WORD_SIGN = 1 << 63
@@ -94,11 +114,15 @@ def word(x):
 def truthy(v):
     if isinstance(v, int):
         return v != 0
+    if isinstance(v, float):
+        return v != 0.0
     return v != ""
 
 
 def fmt(v):
     if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
         return str(v)
     return v
 

@@ -1,0 +1,12 @@
+$ line comments start with a dollar
+
+-$
+multi line comments open with dollar-dash
+they can span as many lines as you like
+and close with dash-dollar
+$-
+
+fn main() {
+    $ comments are stripped before the ein graph is built
+    println("comments never reach the machine")
+}

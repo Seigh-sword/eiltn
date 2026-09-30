@@ -1,4 +1,6 @@
-#bin/ threads=4
+$ recursive fib: the two calls are independent ein nodes
+$ so they are dispatched in the same wave, on worker threads
+$ run with: eiltn parfib.eil -t 4
 
 fn fib(n) {
     if n < 2 {
@@ -12,7 +14,7 @@ fn fib(n) {
 fn main() {
     let t0 = clock()
     let r = fib(20)
-    out r
+    out.printf("fib(20) = %d\n", r)
     let t1 = clock()
-    out t1 - t0
+    out.printf("nanos: %d\n", t1 - t0)
 }

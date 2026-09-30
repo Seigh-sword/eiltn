@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 import os
 import sys
 import threading
@@ -5,8 +7,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from . import ein
-from .errors import EINFault
-from .plan import bind_plan
+from .errors import EINFault, ExitCode
+from .jit import compile_block, jit_line_of, closure_plan
 
 try:
     _CPUS = os.cpu_count() or 1
@@ -56,7 +58,7 @@ def build_schedule(blk):
             cell_stores[c] = i
         elif op == ein.LOAD and x.ops[0][0] == ein.K_CELL:
             cell_loads.setdefault(x.ops[0][1], []).append(i)
-        elif op == ein.OUT or op == ein.ERR or op == ein.NATIVE:
+        elif op in (ein.OUT, ein.ERR, ein.PRINTF, ein.NATIVE):
             if last_effect is not None:
                 link(i, last_effect)
             last_effect = i
@@ -107,18 +109,23 @@ class Frame:
 
 
 class Dispatch:
-    def __init__(self, prog, threads=0, stats=False):
+    def __init__(self, prog, threads=0, stats=False, args=None):
         self.prog = prog
         t = threads if threads > 0 else prog.threads
         if t <= 0:
             t = min(8, _CPUS)
         self.threads = t
+        self.args = list(args) if args else []
         self.pool = None
         self.stats = Stats() if stats else None
         self.depth = 0
-        self.plans = {}
+        self.jits = {}
+        self.seqs = {}
+        self.paras = {}
 
-    def run(self):
+    def run(self, args=None):
+        if args is not None:
+            self.args = list(args)
         sys.setrecursionlimit(30000)
         if self.threads > 1:
             for size in (256 * 1024 * 1024, 64 * 1024 * 1024):
@@ -136,6 +143,9 @@ class Dispatch:
             sys.stdout.flush()
             sys.stderr.write("EIN fault: %s\n" % e)
             return 1
+        except ExitCode as e:
+            sys.stdout.flush()
+            return e.code & 0xFF
         except RecursionError:
             sys.stdout.flush()
             sys.stderr.write("EIN fault: call depth exceeded\n")
@@ -144,6 +154,7 @@ class Dispatch:
             if self.pool is not None:
                 self.pool.shutdown(wait=True)
                 self.pool = None
+            sys.stdout.flush()
             if self.stats is not None:
                 self.stats.nanos = time.perf_counter_ns() - t0
 
@@ -179,14 +190,25 @@ class Dispatch:
         stats = self.stats
         if stats is not None:
             stats.nodes += n
-        plan = self.plans.get(blk)
-        if plan is None:
-            plan = self.plans[blk] = bind_plan(blk, self.prog, self)
-        use_pool = (self.pool is not None and self.depth == 0 and sched.parallel
-                    and self.threads > 1)
         if not sched.parallel:
-            if stats is not None:
-                stats.waves += 1
+            return self.seq_block(blk, ins, n, fn, frame, stats)
+        return self.wave_block(blk, ins, sched, fn, frame, stats)
+
+    def seq_block(self, blk, ins, n, fn, frame, stats):
+        ent = self.jits.get(blk)
+        if ent is None:
+            run, lmap, marker = compile_block(blk, self.prog, self)
+            if run is None:
+                plan = closure_plan(blk, self.prog, self)
+                ent = (None, plan)
+            else:
+                ent = (run, (lmap, marker))
+            self.jits[blk] = ent
+        run, extra = ent
+        if stats is not None:
+            stats.waves += 1
+        if run is None:
+            plan = extra
             x = ins[0]
             try:
                 for f, x in plan:
@@ -199,9 +221,31 @@ class Dispatch:
             except Exception as e:
                 raise self.wrap(fn, x, e) from None
             return self.term(fn, frame, ins)
+        lmap, marker = extra
+        try:
+            run(frame)
+        except EINFault:
+            raise
+        except ExitCode:
+            raise
+        except RecursionError:
+            raise EINFault("in %s: call depth exceeded" % fn.name)
+        except Exception as e:
+            info = jit_line_of(e, marker, lmap)
+            if info is None:
+                raise self.wrap(fn, ins[0], e) from None
+            line, opname = info
+            raise self.wrap_at(fn, opname, line, e) from None
+        return self.term(fn, frame, ins)
+
+    def wave_block(self, blk, ins, sched, fn, frame, stats):
+        plan = self.paras.get(blk)
+        if plan is None:
+            plan = self.paras[blk] = closure_plan(blk, self.prog, self)
         dep = list(sched.dep)
         dependents = sched.dependents
         ready = list(sched.ready0)
+        use_pool = (self.pool is not None and self.depth == 0 and self.threads > 1)
         try:
             while ready:
                 if stats is not None:
@@ -224,6 +268,8 @@ class Dispatch:
                             f(frame)
                         except EINFault:
                             raise
+                        except ExitCode:
+                            raise
                         except Exception as e:
                             raise self.wrap(fn, x, e)
                 for i in wave:
@@ -233,6 +279,8 @@ class Dispatch:
                             ready.append(d)
                 ready.sort()
         except EINFault:
+            raise
+        except ExitCode:
             raise
         except RecursionError:
             raise EINFault("in %s: call depth exceeded" % fn.name)
@@ -268,8 +316,17 @@ class Dispatch:
         return EINFault("in fn %s at %s (line %d): %s"
                         % (fn.name, ein.OPNAMES[x.op], x.line, msg))
 
+    def wrap_at(self, fn, opname, line, e):
+        if isinstance(e, EINFault):
+            return e
+        if isinstance(e, ZeroDivisionError):
+            msg = "division by zero"
+        else:
+            msg = str(e) or type(e).__name__
+        return EINFault("in fn %s at %s (line %d): %s" % (fn.name, opname, line, msg))
 
-def run_program(prog, threads=0, stats=False):
-    d = Dispatch(prog, threads=threads, stats=stats)
+
+def run_program(prog, threads=0, stats=False, args=None):
+    d = Dispatch(prog, threads=threads, stats=stats, args=args)
     rc = d.run()
     return rc, d.stats

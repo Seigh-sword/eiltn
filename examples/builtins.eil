@@ -1,0 +1,21 @@
+$ builtins are lowered away: min and max become compare plus select nodes
+
+fn main() {
+    println(min(3, 9))
+    println(max(3, 9))
+    println(min(2.5, 2.0))
+    println(sqrt(2.0))
+    println(pow(2.0, 10.0))
+    println(floor(3.99))
+    println(ceil(0.1))
+    println(round(3.5))
+    println(abs(0 - 7))
+    println(sin(0.0))
+    println(exp(0.0))
+    println(fmod(7.5, 2.0))
+    println(hex(48879))
+    println(bin(5))
+    println(chr(69) + chr(73))
+    println(ord("A"))
+    println(rand() > 0.0 and rand() < 1.0)
+}

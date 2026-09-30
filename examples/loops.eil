@@ -1,0 +1,18 @@
+$ for loops and while loops run on the jit path, fast as hell
+
+fn main() {
+    let sum = 0
+    for let i = 1; i <= 100; i = i + 1 {
+        set sum = sum + i
+    }
+    out.printf("sum 1..100 = %d\n", sum)
+
+    let j = 0
+    while true {
+        set j = j + 1
+        if j >= 3 {
+            break
+        }
+    }
+    out.printf("broke out at j = %d\n", j)
+}

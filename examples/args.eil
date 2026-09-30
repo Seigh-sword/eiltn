@@ -1,0 +1,8 @@
+$ program arguments arrive through argc and argv
+
+fn main() {
+    out.printf("%d argument(s)\n", argc())
+    for let i = 0; i < argc(); i = i + 1 {
+        out.printf("%d: %s\n", i, argv(i))
+    }
+}

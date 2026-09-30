@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 from .lexer import tokenize
 from .parser import parse
 from .builder import build

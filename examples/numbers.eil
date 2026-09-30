@@ -1,0 +1,17 @@
+$ numbers: 64 bit words wrap around, floats are doubles
+
+fn main() {
+    let w = 9223372036854775807
+    println(w + 1)
+    println(0xFF + 0b1010)
+    println(1_000_000)
+    println(w * 2)
+
+    let x = 3.14
+    let y = 2.0
+    out.printf("%f %f %f\n", x + y, x * y, x / y)
+    println(x)
+    println(int(3.99))
+    println(float(7))
+    println(num("2.5") + 1.5)
+}

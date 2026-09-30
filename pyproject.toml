@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eiltn"
-version = "0.1.0"
-description = "Eiltn: an EIN-dispatched language that runs node waves instead of lines"
+version = "0.2.0"
+description = "eiltn: a jit-dispatched language built on ein node waves"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}

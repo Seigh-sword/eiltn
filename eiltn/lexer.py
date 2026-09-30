@@ -1,12 +1,14 @@
+#!/usr/bin/python3
+
 from .errors import SyntaxErr
 
 KEYWORDS = frozenset((
-    "fn", "let", "set", "out", "err", "if", "else", "while", "return",
+    "fn", "let", "set", "if", "else", "while", "for", "break", "return",
     "true", "false", "and", "or", "not",
 ))
 
 TWO_CHAR_OPS = frozenset(("<<", ">>", "==", "!=", "<=", ">="))
-ONE_CHAR_OPS = frozenset("+-*/%&|^~<>=(){},")
+ONE_CHAR_OPS = frozenset("+-*/%&|^~<>=(){};,.")
 
 HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 BIN_DIGITS = frozenset("01")
@@ -33,7 +35,6 @@ def tokenize(src, name="<source>"):
     line = 1
     col = 1
     n = len(src)
-    saw_token = False
 
     def fault(msg, l=None, c=None):
         raise SyntaxErr("%s:%d:%d: %s" % (name, l if l is not None else line,
@@ -52,51 +53,86 @@ def tokenize(src, name="<source>"):
             i += 1
             col += 1
             continue
-        if c == "#":
-            if not saw_token and src.startswith("#bin/", i):
-                toks.append(Token("dir", "#bin/", line, col))
-                saw_token = True
-                i += 5
-                col += 5
-                continue
-            fault("comments are not part of eiltn; only the #bin/ header is allowed")
+        if c == "$":
+            while i < n and src[i] != "\n":
+                i += 1
+                col += 1
+            continue
+        if c == "-" and src.startswith("-$", i):
+            sl = line
+            sc = col
+            i += 2
+            col += 2
+            end = src.find("$-", i)
+            if end < 0:
+                fault("unterminated multi line comment opened here", sl, sc)
+            seg = src[i:end]
+            nl = seg.count("\n")
+            if nl:
+                line += nl
+                col = len(seg) - seg.rindex("\n")
+            else:
+                col += len(seg)
+            i = end + 2
+            col += 2
+            continue
         if c.isdigit():
+            start_col = col
             start = i
+            val = None
+            fval = None
             if c == "0" and i + 1 < n and src[i + 1] in "xX":
-                base = 16
                 i += 2
                 d = i
                 while i < n and (src[i] in HEX_DIGITS or src[i] == "_"):
                     i += 1
                 if i == d:
                     fault("invalid hex literal")
-                text = src[d:i].replace("_", "")
-                col += i - start
+                val = int(src[d:i].replace("_", ""), 16)
             elif c == "0" and i + 1 < n and src[i + 1] in "bB":
-                base = 2
                 i += 2
                 d = i
                 while i < n and (src[i] in BIN_DIGITS or src[i] == "_"):
                     i += 1
                 if i == d:
                     fault("invalid binary literal")
-                text = src[d:i].replace("_", "")
-                col += i - start
+                val = int(src[d:i].replace("_", ""), 2)
             else:
-                base = 10
                 while i < n and (src[i].isdigit() or src[i] == "_"):
                     i += 1
+                is_float = False
+                if i < n and src[i] == "." and i + 1 < n and src[i + 1].isdigit():
+                    is_float = True
+                    i += 1
+                    while i < n and (src[i].isdigit() or src[i] == "_"):
+                        i += 1
+                if i < n and src[i] in "eE":
+                    k = i + 1
+                    if k < n and src[k] in "+-":
+                        k += 1
+                    if k < n and src[k].isdigit():
+                        is_float = True
+                        i = k
+                        while i < n and src[i].isdigit():
+                            i += 1
                 text = src[start:i].replace("_", "")
-                col += i - start
+                if is_float:
+                    fval = float(text)
+                else:
+                    val = int(text, 10)
             if i < n and (src[i].isalnum() or src[i] == "_"):
                 fault("invalid number literal")
-            val = int(text, base)
-            if val > LITERAL_MAX:
-                fault("integer literal exceeds 64 bits", line, col)
-            if val >= (1 << 63):
-                val -= 1 << 64
-            toks.append(Token("int", val, line, col - (i - start)))
-            saw_token = True
+            if i < n and src[i] == ".":
+                fault("invalid number literal")
+            col += i - start
+            if fval is not None:
+                toks.append(Token("float", fval, line, start_col))
+            else:
+                if val > LITERAL_MAX:
+                    fault("integer literal exceeds 64 bits", line, start_col)
+                if val >= (1 << 63):
+                    val -= 1 << 64
+                toks.append(Token("int", val, line, start_col))
             continue
         if c.isalpha() or c == "_":
             start = i
@@ -108,7 +144,6 @@ def tokenize(src, name="<source>"):
                 toks.append(Token("kw", w, line, col - (i - start)))
             else:
                 toks.append(Token("ident", w, line, col - (i - start)))
-            saw_token = True
             continue
         if c == '"':
             i += 1
@@ -160,23 +195,22 @@ def tokenize(src, name="<source>"):
                 i += 1
                 col += 1
             toks.append(Token("str", "".join(buf), line, start_col))
-            saw_token = True
             continue
         two = src[i:i + 2]
         if two in TWO_CHAR_OPS:
             toks.append(Token("op", two, line, col))
             i += 2
             col += 2
-            saw_token = True
             continue
         if c in ONE_CHAR_OPS:
             toks.append(Token("op", c, line, col))
             i += 1
             col += 1
-            saw_token = True
             continue
         if c == "!":
             fault("unexpected !; use not for logical negation")
+        if c == "#":
+            fault("comments start with $ or open with -$ ... close with $-")
         if ord(c) > 126 or ord(c) < 32:
             fault("unexpected character %r; eiltn source is plain ascii words, digits and operators" % c)
         fault("unexpected character %r" % c)

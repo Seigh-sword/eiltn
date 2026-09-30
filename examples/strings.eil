@@ -1,0 +1,17 @@
+$ strings carry their own builtin set
+
+fn main() {
+    let s = "eiltn"
+    println(len(s))
+    println(upper(s))
+    println(lower("ABC"))
+    println(substr(s, 1, 3))
+    println(contains(s, "il"))
+    println(index(s, "t"))
+    println(index(s, "zz"))
+    println(replace(s, "i", "1"))
+    println(reverse(s))
+    println(repeat("ab", 3))
+    println(trim("  hi  "))
+    println("chain: " + str(7) + " " + chr(33))
+}

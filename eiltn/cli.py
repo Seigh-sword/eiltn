@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 import argparse
 import sys
 import time
@@ -8,7 +10,9 @@ from .disasm import text as disassemble
 from .dispatcher import Dispatch
 from .errors import EiltnError
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
+
+SUBCOMMANDS = ("run", "build", "dis")
 
 
 def _load_prog(path):
@@ -19,7 +23,7 @@ def _load_prog(path):
         with open(path, "r", encoding="utf-8") as fh:
             src = fh.read()
         prog = compile_source(src, path)
-        how = "built ein graph from source"
+        how = "built ein graph, jit ready"
     return prog, how
 
 
@@ -28,7 +32,7 @@ def cmd_run(a):
     prog, how = _load_prog(a.file)
     t1 = time.perf_counter_ns()
     d = Dispatch(prog, threads=a.threads, stats=a.stats)
-    rc = d.run()
+    rc = d.run(args=a.pargs)
     if a.stats:
         s = d.stats
         sys.stderr.write(
@@ -45,10 +49,8 @@ def cmd_build(a):
     out = a.out
     if out is None:
         base = a.file
-        for ext in (".eil", ".eiltn"):
-            if base.endswith(ext):
-                base = base[:-len(ext)]
-                break
+        if base.endswith(".eil"):
+            base = base[:-4]
         out = base + ".ein"
     data = binfmt.dump(prog)
     with open(out, "wb") as fh:
@@ -66,27 +68,38 @@ def cmd_dis(a):
 
 
 def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    argv = list(argv)
+    if argv and argv[0] not in SUBCOMMANDS and not argv[0].startswith("-"):
+        argv.insert(0, "run")
+
     p = argparse.ArgumentParser(
         prog="eiltn",
-        description="eiltn toolchain: build, load and dispatch EIN node graphs")
+        description="eiltn: jit-dispatched EIN node programs")
     p.add_argument("--version", action="version", version="eiltn " + VERSION)
-    sub = p.add_subparsers(dest="cmd", required=True)
+    sub = p.add_subparsers(dest="cmd")
 
-    r = sub.add_parser("run", help="run a .eil source or a compiled .ein binary")
+    r = sub.add_parser("run", help="run a .eil program (eiltn file.eil)")
     r.add_argument("file")
     r.add_argument("-t", "--threads", type=int, default=0,
-                   help="worker threads (0 = header value or auto)")
+                   help="worker threads for parallel call waves (0 = auto)")
     r.add_argument("-s", "--stats", action="store_true",
                    help="print ein dispatch statistics to stderr")
+    r.add_argument("pargs", nargs=argparse.REMAINDER,
+                   help="arguments passed to the program (argv)")
 
-    b = sub.add_parser("build", help="compile source to an ein binary")
+    b = sub.add_parser("build", help="compile a program to an ein binary")
     b.add_argument("file")
     b.add_argument("-o", "--out", help="output path (default: <name>.ein)")
 
-    d = sub.add_parser("dis", help="disassemble an ein node graph")
+    d = sub.add_parser("dis", help="disassemble a program or ein binary")
     d.add_argument("file")
 
     a = p.parse_args(argv)
+    if a.cmd is None:
+        p.print_usage(sys.stderr)
+        return 2
     try:
         if a.cmd == "run":
             return cmd_run(a)

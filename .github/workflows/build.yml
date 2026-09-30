@@ -1,0 +1,76 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install
+        run: pip install .
+      - name: run tests
+        run: python -m unittest discover -s tests
+
+  package:
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            osname: linux-x64
+          - os: macos-latest
+            osname: macos-arm64
+          - os: windows-latest
+            osname: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install pyinstaller
+        run: pip install pyinstaller .
+      - name: build executable
+        run: pyinstaller --clean --noconfirm eiltn.spec
+      - name: rename artifact
+        shell: bash
+        run: |
+          if [ -f dist/eiltn.exe ]; then
+            mv dist/eiltn.exe dist/eiltn-${{ matrix.osname }}.exe
+          else
+            mv dist/eiltn dist/eiltn-${{ matrix.osname }}
+          fi
+      - name: smoke test
+        shell: bash
+        run: |
+          ./dist/eiltn-* --version
+          ./dist/eiltn-* examples/hello.eil
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eiltn-${{ matrix.osname }}
+          path: dist/eiltn-*
+
+  release:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/eiltn-*

@@ -1,6 +1,11 @@
+#!/usr/bin/python3
+
 from . import ein
 from .errors import BuildErr
-from .syntax import Let, Set, Out, If, While, Return, ExprStmt, Lit, Var, Un, Bin, Call
+from .syntax import (
+    Let, Set, Out, If, While, For, Break, Return, ExprStmt,
+    Lit, Var, Un, Bin, Call,
+)
 
 BIN_OPS = {
     "+": ein.ADD, "-": ein.SUB, "*": ein.MUL, "/": ein.DIV, "%": ein.MOD,
@@ -11,9 +16,15 @@ BIN_OPS = {
 
 UN_OPS = {"-": ein.NEG, "~": ein.BNOT, "not": ein.NOT}
 
-NATIVE_MIN_ARITY = {}
-for _i, _n in enumerate(ein.NATIVES):
-    NATIVE_MIN_ARITY[_n] = ein.NATIVE_ARITY[_i]
+IO_CHANNELS = {
+    "println": 0,
+    "out.println": 0,
+    "err.println": 1,
+    "out.printf": 0,
+    "err.printf": 1,
+}
+
+DESUGARED = ("min", "max")
 
 
 class Builder:
@@ -45,8 +56,7 @@ class Builder:
             raise BuildErr("%s: main must take no parameters" % self.name)
         for idx, f in enumerate(self.ast.funcs):
             self.funcs.append(FnCompiler(self, f, idx).run())
-        threads = self.ast.attrs.get("threads", 0)
-        return ein.Program(self.consts, self.funcs, entry, threads, self.name)
+        return ein.Program(self.consts, self.funcs, entry, 0, self.name)
 
 
 class FnCompiler:
@@ -64,6 +74,7 @@ class FnCompiler:
         self.cur = self.blocks[0].ins
         self.ver = {}
         self.done = False
+        self.loop_exits = []
 
     def fault(self, msg, line):
         raise BuildErr("%s:%d: in fn %s: %s" % (self.b.name, line, self.name, msg))
@@ -101,7 +112,7 @@ class FnCompiler:
 
     def stmt(self, s):
         if self.done:
-            self.fault("unreachable statement after return", s.line)
+            self.fault("unreachable statement after return, break or continue of loop", s.line)
         if isinstance(s, Let):
             if s.name in self.cells:
                 self.fault("%r is already bound in this function; use set" % s.name, s.line)
@@ -127,6 +138,10 @@ class FnCompiler:
                 o = self.operand(s.expr)
             self.emit(ein.RET, 0, (o,), 0, 0, s.line)
             self.done = True
+        elif isinstance(s, Break):
+            if not self.loop_exits:
+                self.fault("break outside of a loop", s.line)
+            self.jmp(self.loop_exits[-1], s.line)
         elif isinstance(s, If):
             c = self.expr(s.cond)
             bt = self.new_block()
@@ -155,11 +170,43 @@ class FnCompiler:
             bx = self.new_block()
             self.emit(ein.BR, 0, ((ein.K_REG, c),), bb, bx, s.line)
             self.done = True
+            self.loop_exits.append(bx)
             self.open(bb)
             for x in s.body:
                 self.stmt(x)
             if not self.done:
                 self.jmp(bc, s.line)
+            self.loop_exits.pop()
+            self.open(bx)
+        elif isinstance(s, For):
+            if s.init is not None:
+                self.stmt(s.init)
+                self.done = False
+            bc = self.new_block()
+            self.jmp(bc, s.line)
+            self.open(bc)
+            bb = self.new_block()
+            bx = self.new_block()
+            if s.cond is not None:
+                c = self.expr(s.cond)
+                self.emit(ein.BR, 0, ((ein.K_REG, c),), bb, bx, s.line)
+            else:
+                self.emit(ein.JMP, 0, (), bb, 0, s.line)
+            self.done = True
+            bs = self.new_block()
+            self.loop_exits.append(bx)
+            self.open(bb)
+            for x in s.body:
+                self.stmt(x)
+            if not self.done:
+                self.jmp(bs, s.line)
+            self.open(bs)
+            if s.step is not None:
+                self.stmt(s.step)
+                self.done = False
+            self.emit(ein.JMP, 0, (), bc, 0, s.line)
+            self.done = True
+            self.loop_exits.pop()
             self.open(bx)
         elif isinstance(s, ExprStmt):
             self.expr(s.call)
@@ -202,7 +249,40 @@ class FnCompiler:
             return self.call(e)
         self.fault("unknown expression", getattr(e, "line", 0))
 
+    def io_call(self, e):
+        channel = IO_CHANNELS[e.name]
+        if e.name.endswith("println"):
+            if len(e.args) != 1:
+                self.fault("%s expects exactly 1 argument, got %d" % (e.name, len(e.args)), e.line)
+            o = self.operand(e.args[0])
+            self.emit(ein.OUT if channel == 0 else ein.ERR, 0, (o,), 0, 0, e.line)
+            return 0
+        if len(e.args) < 1:
+            self.fault("%s expects a format string plus arguments" % e.name, e.line)
+        fmtop = self.operand(e.args[0])
+        argops = [(ein.K_REG, self.expr(a)) for a in e.args[1:]]
+        self.emit(ein.PRINTF, 0, (fmtop,) + tuple(argops), channel, 0, e.line)
+        return 0
+
+    def desugar_minmax(self, e):
+        want_min = e.name == "min"
+        if len(e.args) != 2:
+            self.fault("%s expects exactly 2 arguments, got %d" % (e.name, len(e.args)), e.line)
+        l = self.expr(e.args[0])
+        r2 = self.expr(e.args[1])
+        c = self.reg()
+        self.emit(ein.LT if want_min else ein.GT, c,
+                  ((ein.K_REG, l), (ein.K_REG, r2)), 0, 0, e.line)
+        d = self.reg()
+        self.emit(ein.SELECT, d, ((ein.K_REG, c), (ein.K_REG, l), (ein.K_REG, r2)),
+                  0, 0, e.line)
+        return d
+
     def call(self, e):
+        if e.name in IO_CHANNELS:
+            return self.io_call(e)
+        if e.name in DESUGARED:
+            return self.desugar_minmax(e)
         sig = self.b.signatures.get(e.name)
         if sig is not None:
             idx, arity = sig
@@ -213,8 +293,8 @@ class FnCompiler:
             r = self.reg()
             self.emit(ein.CALL, r, tuple(argops), idx, 0, e.line)
             return r
-        if e.name in NATIVE_MIN_ARITY:
-            want = NATIVE_MIN_ARITY[e.name]
+        if e.name in ein.NATIVES:
+            want = ein.NATIVE_ARITY[ein.NATIVES.index(e.name)]
             if len(e.args) != want:
                 self.fault("native %s expects %d argument(s), got %d"
                            % (e.name, want, len(e.args)), e.line)

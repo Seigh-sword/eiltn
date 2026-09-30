@@ -1,10 +1,12 @@
+#!/usr/bin/python3
+
 import struct
 
 from . import ein
 from .errors import LoadErr
 
 MAGIC = b"EILN"
-VERSION = 1
+VERSION = 2
 
 
 class _Reader:
@@ -33,6 +35,9 @@ class _Reader:
     def i64(self, what):
         return struct.unpack("<q", self.take(8, what))[0]
 
+    def f64(self, what):
+        return struct.unpack("<d", self.take(8, what))[0]
+
     def raw(self, n, what):
         return self.take(n, what)
 
@@ -51,6 +56,8 @@ def dump(prog):
             b = c.encode("utf-8")
             out += struct.pack("<BI", 2, len(b))
             out += b
+        elif isinstance(c, float):
+            out += struct.pack("<Bd", 3, c)
         else:
             out += struct.pack("<Bq", 1, c)
     for f in prog.funcs:
@@ -77,13 +84,15 @@ def dump(prog):
                     out += struct.pack("<B", x.aux)
                 elif x.op == ein.STORE:
                     out += struct.pack("<H", x.aux)
+                elif x.op == ein.PRINTF:
+                    out += struct.pack("<B", x.aux)
     return bytes(out)
 
 
 def parse(data, name="<ein>"):
     r = _Reader(data)
     if r.take(4, "magic") != MAGIC:
-        raise LoadErr("%s is not an eiltn .ein binary (bad magic)" % name)
+        raise LoadErr("%s is not an eiltn ein binary (bad magic)" % name)
     version = r.u8("version")
     if version != VERSION:
         raise LoadErr("unsupported ein binary version %d (expected %d)" % (version, VERSION))
@@ -103,6 +112,8 @@ def parse(data, name="<ein>"):
         elif tag == 2:
             slen = r.u32("string length")
             consts.append(r.raw(slen, "string bytes").decode("utf-8", "replace"))
+        elif tag == 3:
+            consts.append(r.f64("float value"))
         else:
             raise LoadErr("bad const tag %d at index %d" % (tag, ci))
 
@@ -167,6 +178,12 @@ def parse(data, name="<ein>"):
                     aux = r.u16("store cell")
                     if aux >= ncells:
                         raise LoadErr("store cell out of range in fn %s" % fname)
+                elif op == ein.PRINTF:
+                    aux = r.u8("printf channel")
+                    if aux not in (0, 1):
+                        raise LoadErr("printf channel must be 0 or 1 in fn %s" % fname)
+                    if not ops:
+                        raise LoadErr("printf needs a format operand in fn %s" % fname)
                 if not _check_shape(op, ops):
                     raise LoadErr("malformed operands for %s in fn %s (block %d inst %d)"
                                   % (ein.OPNAMES[op], fname, bi, ii))
@@ -202,6 +219,11 @@ def _check_shape(op, ops):
         return n == 2 and kinds == (ein.K_REG, ein.K_REG)
     if op in (ein.NEG, ein.BNOT, ein.NOT):
         return n == 1 and kinds == (ein.K_REG,)
+    if op == ein.SELECT:
+        return n == 3 and kinds == (ein.K_REG, ein.K_REG, ein.K_REG)
+    if op == ein.PRINTF:
+        return n >= 1 and kinds[0] in (ein.K_REG, ein.K_CONST) \
+            and all(k == ein.K_REG for k in kinds[1:])
     if op in (ein.OUT, ein.ERR):
         return n == 1 and kinds[0] in (ein.K_REG, ein.K_CONST)
     if op == ein.JMP:

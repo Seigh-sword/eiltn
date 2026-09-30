@@ -1,0 +1,16 @@
+#bin/
+
+fn main() {
+    let m = 0b1011_0001
+    let k = 0x0F
+    out m
+    out m & k
+    out m | k
+    out m ^ 0xFF
+    out m << 2
+    out m >> 3
+    out ~m
+    out hex(m)
+    let w = 9223372036854775807
+    out w + 1
+}

@@ -1,0 +1,7 @@
+#bin/
+
+fn main() {
+    out "hello from eiltn"
+    let t = clock()
+    out t
+}

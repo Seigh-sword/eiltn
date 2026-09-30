@@ -1,0 +1,19 @@
+#bin/ threads=4
+
+fn sq(x) {
+    return x * x
+}
+
+fn main() {
+    let a = sq(8)
+    let b = sq(9)
+    let c = a + b
+    out c
+    let s = "result: " + str(c)
+    out s
+    out len(s)
+    out chr(69) + chr(105)
+    out num("42") + 1
+    out abs(0 - 7)
+    out hex(48879)
+}

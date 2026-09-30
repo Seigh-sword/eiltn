@@ -1,0 +1,18 @@
+#bin/ threads=4
+
+fn fib(n) {
+    if n < 2 {
+        return n
+    }
+    let a = fib(n - 1)
+    let b = fib(n - 2)
+    return a + b
+}
+
+fn main() {
+    let t0 = clock()
+    let r = fib(20)
+    out r
+    let t1 = clock()
+    out t1 - t0
+}

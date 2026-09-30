@@ -1,0 +1,15 @@
+#bin/
+
+fn main() {
+    let n = 1000000
+    let i = 0
+    let s = 0
+    let t0 = clock()
+    while i < n {
+        set s = s + i
+        set i = i + 1
+    }
+    out s
+    let t1 = clock()
+    out t1 - t0
+}
